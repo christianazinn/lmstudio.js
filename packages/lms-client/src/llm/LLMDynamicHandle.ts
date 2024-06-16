@@ -17,6 +17,7 @@ import {
   type LLMFullPredictionConfig,
 } from "@lmstudio/lms-shared-types/dist/llm/LLMPredictionConfig";
 import { z } from "zod";
+import { EmbeddingOngoingPrediction } from "./EmbeddingOngoingPrediction";
 import { type LLMNamespace } from "./LLMNamespace";
 import { OngoingPrediction } from "./OngoingPrediction";
 import { type PredictionResult } from "./PredictionResult";
@@ -108,6 +109,63 @@ export class LLMDynamicHandle {
       channel.send({ type: "cancel" });
     });
     channel.onError.subscribeOnce(onError);
+    }
+
+  /** @internal */
+  private embedCall(
+    modelSpecifier: LLMModelSpecifier,
+    prompts: Array<string>,
+    cancelEvent: BufferedEvent<void>,
+    onFragment: (fragment: Array<number>) => void,
+    onFinished: (modelInfo: LLMDescriptor) => void,
+    onError: (error: Error) => void,
+  ) {
+    const channel = this.llmPort.createChannel(
+      "embed",
+      { modelSpecifier, prompts },
+      message => {
+        switch (message.type) {
+          case "fragment":
+            onFragment(message.fragment);
+            break;
+          case "success":
+            onFinished(message.modelInfo);
+            break;
+        }
+      },
+      { stack: getCurrentStack(2) },
+    );
+    cancelEvent.subscribeOnce(() => {
+      channel.send({ type: "cancel" });
+    });
+    channel.onError.subscribeOnce(onError);
+  }
+
+  public embed(prompt: string) {
+    return this.embedArray([prompt])
+  }
+
+  public embedArray(prompts: Array<string>) {
+    const stack = getCurrentStack(1);
+    [prompts] = this.validator.validateMethodParamsOrThrow(
+      "model",
+      "embedArray",
+      ["prompts"],
+      [z.array(z.string())],
+      [prompts],
+      stack,
+    )
+    const [cancelEvent, emitCancelEvent] = BufferedEvent.create<void>();
+    const { ongoingPrediction, finished, failed, push } = EmbeddingOngoingPrediction.create(emitCancelEvent);
+    this.embedCall(
+      this.specifier,
+      prompts,
+      cancelEvent,
+      fragment => push(fragment),
+      modelInfo => finished(modelInfo),
+      error => failed(error),
+    );
+    return ongoingPrediction;
   }
 
   /**

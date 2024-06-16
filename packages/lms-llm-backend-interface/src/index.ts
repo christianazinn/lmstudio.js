@@ -71,6 +71,26 @@ export function createLlmBackendInterface() {
         }),
       ]),
     })
+    .addChannelEndpoint("embed", {
+        creationParameter: z.object({
+            modelSpecifier: llmModelSpecifierSchema
+        }),
+        toClientPacket: z.discriminatedUnion("type", [
+          z.object({
+            type: z.literal("fragment"),
+            fragment: z.array(z.number()),
+          }),
+          z.object({
+            type: z.literal("success"),
+            modelInfo: llmDescriptorSchema,
+          }),
+        ]),
+        toServerPacket: z.discriminatedUnion("type", [
+          z.object({
+            type: z.literal("cancel"),
+          }),
+        ]),
+    })
     .addRpcEndpoint("listLoaded", {
       parameter: z.undefined(),
       returns: z.array(llmDescriptorSchema),
